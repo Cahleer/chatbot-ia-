@@ -1,0 +1,89 @@
+import PyPDF2
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
+
+def extract_text(pdf_path):
+    reader = PyPDF2.PdfReader(pdf_path)
+    full_text = ""
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        full_text += text + "\n"
+    return full_text
+
+# Función para dividir el texto en fragmentos
+
+def split_chunks(text, chunk_size=500, overlap=50):
+    words = text.split()
+    chunks = []
+    start = 0
+    while start < len(words):
+        end = start + chunk_size
+        chunk = words[start:end]
+        chunks.append(" ".join(chunk))
+        start += chunk_size - overlap
+    return chunks
+
+# Ejecutar la función con tu PDF
+pdf_path = r"C:/Users/crist/Desktop/tesisna/fuentes/tema/6 (4) 105-118.pdf"
+texto_extraido = extract_text(pdf_path)
+
+# Guardar el texto extraído en un archivo
+with open("texto_extraido.txt", "w", encoding="utf-8") as archivo:
+    archivo.write(texto_extraido)
+
+# Dividir el texto en fragmentos
+fragments = split_chunks(texto_extraido, chunk_size=500, overlap=50)
+
+# Guardar cada fragmento en un archivo separado
+for i, fragment in enumerate(fragments, 1):
+    nombre_archivo = f"fragmento_{i}.txt"
+    with open(nombre_archivo, "w", encoding="utf-8") as f:
+        f.write(fragment)
+
+print(f"Se extrajeron {len(texto_extraido)} caracteres del PDF")
+print(f"Total de fragmentos: {len(fragments)}")
+print("Cada fragmento ha sido guardado en archivos separados (fragmento_1.txt, fragmento_2.txt, ...)")
+
+# Generar embeddings con Sentence-Transformers
+print("Cargando modelo de Sentence-Transformers...")
+modelo = SentenceTransformer('all-MiniLM-L6-v2')
+print("Generando embeddings de los fragmentos...")
+embeddings = modelo.encode(fragments, show_progress_bar=True)
+
+# Guardar embeddings en un índice FAISS
+print("Creando índice FAISS...")
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatL2(dimension)
+index.add(np.array(embeddings, dtype=np.float32))
+faiss.write_index(index, "faiss_index.idx")
+print("Índice FAISS guardado como 'faiss_index.idx'")
+
+# Guardar embeddings y fragmentos para uso posterior
+np.save('embeddings.npy', embeddings)
+with open('fragments.txt', 'w', encoding='utf-8') as f:
+    for fragment in fragments:
+        f.write(fragment + '\n---\n')
+
+# Función para buscar fragmentos relevantes
+def buscar_fragmentos_relevantes(pregunta, top_k=3):
+    # Convertir la pregunta en embedding
+    pregunta_embedding = modelo.encode([pregunta])
+    
+    # Buscar en el índice FAISS
+    _, indices = index.search(pregunta_embedding, top_k)
+    
+    # Obtener los fragmentos más relevantes
+    fragmentos_relevantes = [fragments[i] for i in indices[0]]
+    return fragmentos_relevantes
+
+# Ejemplo de uso
+print("\n=== Ejemplo de búsqueda semántica ===")
+pregunta_ejemplo = "¿Cuál es el impacto de las TIC en la agricultura?"
+fragmentos_encontrados = buscar_fragmentos_relevantes(pregunta_ejemplo, top_k=2)
+
+print(f"Pregunta: {pregunta_ejemplo}")
+print("\nFragmentos más relevantes:")
+for i, fragmento in enumerate(fragmentos_encontrados, 1):
+    print(f"\n--- Fragmento {i} ---")
+    print(fragmento[:200] + "..." if len(fragmento) > 200 else fragmento) 
